@@ -30,7 +30,7 @@ if uploaded_file:
         company = st.multiselect("Filter by Company", options=sorted(df['Company'].dropna().unique()))
         sector = st.multiselect("Filter by Sector", options=sorted(df['Sector'].dropna().unique()))
         location = st.multiselect("Filter by Location", options=sorted(df['Location'].dropna().unique()))
-        show_map = st.checkbox("Show contacts on map", value=True)
+        show_map = st.checkbox("Show contacts on map", value=False)  # Default is now unchecked
 
     # Filtering
     filtered_df = df.copy()
