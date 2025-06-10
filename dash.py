@@ -1,22 +1,10 @@
 import streamlit as st
 import pandas as pd
+import pydeck as pdk
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
 st.set_page_config(page_title="Dealer Directory", page_icon="📇", layout="wide")
-
-# Font Awesome for icons
-st.markdown("""
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<style>
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow:0 8px 24px rgba(0,0,0,0.15);
-        transition: all 0.3s ease;
-    }
-    .card {
-        transition: all 0.3s ease;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 DEFAULT_AVATAR = "https://www.w3schools.com/howto/img_avatar.png"
 
@@ -36,12 +24,13 @@ if uploaded_file:
     all_names = df['Name'].dropna().astype(str).unique().tolist()
     search_name = st.selectbox("Search by Name (with suggestions)", [""] + all_names)
 
-    # Sidebar filters
+    # Sidebar filters and MAP feature (NO city count here)
     with st.sidebar:
         st.header("🔍 Filter")
         company = st.multiselect("Filter by Company", options=sorted(df['Company'].dropna().unique()))
         sector = st.multiselect("Filter by Sector", options=sorted(df['Sector'].dropna().unique()))
         location = st.multiselect("Filter by Location", options=sorted(df['Location'].dropna().unique()))
+        show_map = st.checkbox("Show contacts on map", value=True)
 
     # Filtering
     filtered_df = df.copy()
@@ -54,12 +43,72 @@ if uploaded_file:
     if location:
         filtered_df = filtered_df[filtered_df['Location'].isin(location)]
 
-    # Reset index to avoid out-of-bounds errors
     filtered_df = filtered_df.reset_index(drop=True)
+
+    # --- MAP FEATURE ---
+    if show_map:
+        st.subheader("🗺️ Contacts Map (City Counts)")
+        # Group by city and count
+        city_group = filtered_df.groupby("Location").size().reset_index(name="Count")
+        # Geocode cities if lat/lon not present
+        if 'Latitude' in filtered_df.columns and 'Longitude' in filtered_df.columns:
+            city_group['Latitude'] = filtered_df.groupby("Location")['Latitude'].first().values
+            city_group['Longitude'] = filtered_df.groupby("Location")['Longitude'].first().values
+        else:
+            geolocator = Nominatim(user_agent="dealer-directory")
+            geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+
+            @st.cache_data(show_spinner=True)
+            def get_lat_lon(location):
+                try:
+                    loc = geocode(location)
+                    if loc:
+                        return loc.latitude, loc.longitude
+                except:
+                    return None, None
+                return None, None
+
+            city_group['Latitude'], city_group['Longitude'] = zip(*city_group['Location'].astype(str).apply(get_lat_lon))
+
+        city_group = city_group.dropna(subset=['Latitude', 'Longitude'])
+
+        # Prepare layers: one for pins, one for text
+        scatter_layer = pdk.Layer(
+            "ScatterplotLayer",
+            data=city_group,
+            get_position='[Longitude, Latitude]',
+            get_color='[200, 30, 0, 160]',
+            get_radius=12000,
+            pickable=True,
+        )
+
+        text_layer = pdk.Layer(
+            "TextLayer",
+            data=city_group,
+            get_position='[Longitude, Latitude]',
+            get_text="Count",
+            get_color=[0, 0, 0, 255],
+            get_size=24,
+            get_alignment_baseline="'bottom'",
+        )
+
+        if not city_group.empty:
+            st.pydeck_chart(pdk.Deck(
+                map_style="mapbox://styles/mapbox/light-v9",  # Normal map style
+                initial_view_state=pdk.ViewState(
+                    latitude=city_group['Latitude'].mean(),
+                    longitude=city_group['Longitude'].mean(),
+                    zoom=4,
+                ),
+                layers=[scatter_layer, text_layer],
+                tooltip={"text": "{Location}: {Count} contacts"}
+            ))
+            st.caption("Red pins = cities. Number = contacts in city.")
+        else:
+            st.info("No valid locations found to display on map.")
 
     st.markdown("### Dealers")
     cols = st.columns(3)
-
     for idx, row in filtered_df.iterrows():
         with cols[idx % 3]:
             avatar_url = row['Photo'] if pd.notnull(row['Photo']) and str(row['Photo']).strip() else DEFAULT_AVATAR
