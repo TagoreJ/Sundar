@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import pydeck as pdk
 import networkx as nx
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from traceback import format_exc
 
 st.set_page_config(page_title="Dealer Directory", page_icon="📇", layout="wide")
@@ -35,7 +38,7 @@ def contact_card(row):
     st.markdown(
         f"""
         <div style="background:#fff; border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,0.1);
-        padding:20px; min-height:430px; max-height:430px; display:flex; flex-direction:column; justify-content:space-between; text-align:center;">
+        padding:20px; min-height:612px; max-height:612px; display:flex; flex-direction:column; justify-content:space-between; text-align:center;">
             <img src="{avatar_url}" alt="Avatar" style="width:90px; height:90px; border-radius:50%; margin-bottom:12px; border:2px solid #e7e7e7; object-fit:cover; display:block; margin-left:auto; margin-right:auto;">
             <div style="margin-bottom:0;">
                 <h4 style="color:#111; margin:0;">{name}</h4>
@@ -66,6 +69,40 @@ def show_cards(df):
                 with cols[j]:
                     contact_card(df.iloc[idx])
 
+def generate_pdf_reportlab(df, title="Dealer Directory Search Results"):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width / 2, height - 40, title)
+    y = height - 70
+    c.setFont("Helvetica", 10)
+    line_height = 14
+    for idx, row in df.iterrows():
+        if y < 80:
+            c.showPage()
+            y = height - 40
+            c.setFont("Helvetica", 10)
+        c.drawString(40, y, f"Name: {safe_display(row['Name'])}")
+        c.drawString(300, y, f"Position: {safe_display(row['Position'])}")
+        y -= line_height
+        c.drawString(40, y, f"Company: {safe_display(row['Company'])}")
+        c.drawString(300, y, f"Location: {safe_display(row['Location'])}")
+        y -= line_height
+        c.drawString(40, y, f"Place: {safe_display(row['Place'])}")
+        c.drawString(300, y, f"Sector: {safe_display(row['Sector'])}")
+        y -= line_height
+        c.drawString(40, y, f"Email: {safe_display(row['Email Address'])}")
+        c.drawString(300, y, f"Phone: {safe_display(row['Phone Number'])}")
+        y -= line_height
+        c.drawString(40, y, f"LinkedIn: {safe_display(row['Linkedin Link'])}")
+        y -= line_height + 10
+        c.line(40, y, width - 40, y)
+        y -= 20
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
 def main():
     st.title("📇 Dealer Directory")
 
@@ -80,7 +117,6 @@ def main():
             sheet_names = xls.sheet_names
             selected_sheet = st.radio("Select Dealer Type", options=["All"] + sheet_names, horizontal=True)
 
-            # Load data
             if selected_sheet == "All":
                 df_list = []
                 for sheet in sheet_names:
@@ -92,27 +128,20 @@ def main():
                 df = pd.read_excel(xls, sheet_name=selected_sheet)
                 df.columns = df.columns.str.strip()
 
-            # Ensure expected columns exist or add defaults
             expected_cols = ['Name', 'Company', 'Location', 'Place', 'Latitude', 'Longitude',
                              'Email Address', 'Linkedin Link', 'Phone Number', 'Position', 'Sector', 'Photo']
             for col in expected_cols:
                 if col not in df.columns:
                     df[col] = None
 
-        # Sidebar filters
         st.sidebar.header("Filters & Route Planner")
-
-        # Search by name
         all_names = [""] + sorted(df['Name'].dropna().astype(str).unique().tolist())
         search_name = st.sidebar.selectbox("Search by Name", options=all_names)
-
-        # Filters
         company_filter = st.sidebar.multiselect("Filter by Company", options=sorted(df['Company'].dropna().unique()))
         sector_filter = st.sidebar.multiselect("Filter by Sector", options=sorted(df['Sector'].dropna().unique()))
         position_filter = st.sidebar.multiselect("Filter by Position", options=sorted(df['Position'].dropna().unique()))
         location_filter = st.sidebar.multiselect("Filter by Location (City/State)", options=sorted(df['Location'].dropna().unique()))
 
-        # Route Planner controls
         st.sidebar.markdown("---")
         st.sidebar.subheader("Optimal Route Planner")
         route_location = st.sidebar.selectbox("Select Location for Route", options=[""] + sorted(df['Location'].dropna().unique()))
@@ -124,7 +153,6 @@ def main():
         if route_location and route_places:
             calc_route = st.sidebar.checkbox("Calculate Route")
 
-        # Always define filtered_df before any early return or stop!
         with st.spinner("Filtering contacts..."):
             filtered_df = df.copy()
             if search_name and search_name != "":
@@ -139,7 +167,6 @@ def main():
                 filtered_df = filtered_df[filtered_df['Location'].isin(location_filter)]
             filtered_df = filtered_df.reset_index(drop=True)
 
-        # --------- Optimal Route Planner Output ---------
         if route_location and not route_places and not calc_route:
             with st.spinner("Loading contacts for selected location..."):
                 location_contacts = df[df['Location'] == route_location]
@@ -147,6 +174,13 @@ def main():
                 if len(location_contacts) == 0:
                     st.info("No contacts found for this location.")
                 else:
+                    pdf_bytes = generate_pdf_reportlab(location_contacts, title=f"Contacts in {route_location}")
+                    st.download_button(
+                        label="Download These Contacts as PDF",
+                        data=pdf_bytes,
+                        file_name=f"contacts_{route_location}.pdf",
+                        mime="application/pdf"
+                    )
                     show_cards(location_contacts)
                 st.stop()
 
@@ -155,6 +189,13 @@ def main():
                 selected_contacts = df[(df['Location'] == route_location) & (df['Place'].isin(route_places))]
                 st.markdown(f"## Contacts in Selected Places: {', '.join([safe_display(p) for p in route_places])}")
                 if len(selected_contacts) > 0:
+                    pdf_bytes = generate_pdf_reportlab(selected_contacts, title=f"Contacts in {route_location} - {', '.join([safe_display(p) for p in route_places])}")
+                    st.download_button(
+                        label="Download These Contacts as PDF",
+                        data=pdf_bytes,
+                        file_name=f"contacts_{route_location}_{'_'.join([safe_display(p) for p in route_places])}.pdf",
+                        mime="application/pdf"
+                    )
                     show_cards(selected_contacts)
                 st.stop()
 
@@ -186,7 +227,7 @@ def main():
                         tsp_path = nx.approximation.traveling_salesman_problem(G, cycle=False)
 
                         total_distance = sum(dist_matrix[tsp_path[i], tsp_path[i+1]] for i in range(n-1))
-                        avg_speed_kmh = 40  # avg urban speed
+                        avg_speed_kmh = 40
                         total_time_hours = total_distance / avg_speed_kmh
                         hours = int(total_time_hours)
                         minutes = int((total_time_hours - hours) * 60)
@@ -195,7 +236,6 @@ def main():
                         st.write(f"**Total Distance:** {total_distance:.1f} km")
                         st.write(f"**Estimated Total Time:** {hours} hours {minutes} minutes (assuming avg speed {avg_speed_kmh} km/h)")
 
-                        # Prepare lines for map (no points, just line)
                         lines = []
                         for i in range(len(tsp_path)-1):
                             start_idx = tsp_path[i]
@@ -229,31 +269,43 @@ def main():
                             layers=[path_layer],
                         ))
 
-                        # Show travel times between places
                         st.markdown("### Travel Times Between Places")
                         for i, line in enumerate(lines):
                             st.write(f"{route_df.iloc[tsp_path[i]]['Place']} → {route_df.iloc[tsp_path[i+1]]['Place']}: "
                                      f"{line['distance']:.1f} km, approx {line['time_min']:.0f} minutes")
 
-                        # Show cards for only the route contacts, in order
                         st.markdown("### Contacts for Route (in Visit Order)")
+                        pdf_bytes = generate_pdf_reportlab(route_df.iloc[tsp_path], title="Contacts for Route (in Visit Order)")
+                        st.download_button(
+                            label="Download These Contacts as PDF",
+                            data=pdf_bytes,
+                            file_name="route_contacts.pdf",
+                            mime="application/pdf"
+                        )
                         show_cards(route_df.iloc[tsp_path])
                 except Exception as e:
                     st.error("Error calculating or displaying route.")
                     st.error(str(e))
                 st.stop()
 
-        # --------- Main Dashboard (only if not in route mode or location selection) ---------
         with st.spinner("Rendering dashboard..."):
             st.markdown(f"## {len(filtered_df)} Contacts Found")
             if len(filtered_df) == 0:
                 st.info("No contacts found with the current filters.")
             else:
+                pdf_bytes = generate_pdf_reportlab(filtered_df, title="Dealer Directory Search Results")
+                st.download_button(
+                    label="Download These Contacts as PDF",
+                    data=pdf_bytes,
+                    file_name="search_results.pdf",
+                    mime="application/pdf"
+                )
                 show_cards(filtered_df)
 
     except Exception as e:
         st.error("An unexpected error occurred while processing your file or inputs.")
         st.error(str(e))
+        st.code(format_exc())
 
 if __name__ == "__main__":
     main()
