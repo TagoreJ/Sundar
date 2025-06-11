@@ -4,3 +4,4 @@ numpy
 pydeck
 networkx
 openpyxl
+reportlab
