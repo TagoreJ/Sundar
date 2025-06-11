@@ -38,7 +38,7 @@ def contact_card(row):
     st.markdown(
         f"""
         <div style="background:#fff; border-radius:16px; box-shadow:0 4px 16px rgba(0,0,0,0.1);
-        padding:20px; min-height:612px; max-height:612px; display:flex; flex-direction:column; justify-content:space-between; text-align:center;">
+        padding:20px; min-height:430px; max-height:430px; display:flex; flex-direction:column; justify-content:space-between; text-align:center;">
             <img src="{avatar_url}" alt="Avatar" style="width:90px; height:90px; border-radius:50%; margin-bottom:12px; border:2px solid #e7e7e7; object-fit:cover; display:block; margin-left:auto; margin-right:auto;">
             <div style="margin-bottom:0;">
                 <h4 style="color:#111; margin:0;">{name}</h4>
